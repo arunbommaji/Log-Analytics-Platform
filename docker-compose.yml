@@ -1,0 +1,158 @@
+version: '3.9'
+
+services:
+  # ── Kafka Stack ────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [platform]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 3
+    networks: [platform]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on: [kafka]
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks: [platform]
+
+  # ── Elasticsearch + Kibana ─────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks: [platform]
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    container_name: kibana
+    depends_on: [elasticsearch]
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks: [platform]
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks: [platform]
+
+  # ── PostgreSQL (incidents DB) ──────────────────────────────────────────────
+  incidents-db:
+    image: postgres:16-alpine
+    container_name: incidents-db
+    environment:
+      POSTGRES_DB: incidentsdb
+      POSTGRES_USER: incidentuser
+      POSTGRES_PASSWORD: incidentpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - incidents-db-data:/var/lib/postgresql/data
+    networks: [platform]
+
+  # ── Microservices ──────────────────────────────────────────────────────────
+  ingestion-service:
+    build: ./ingestion-service
+    container_name: ingestion-service
+    depends_on: [kafka]
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC_RAW_LOGS: raw-logs
+    networks: [platform]
+    restart: on-failure
+
+  processor-service:
+    build: ./processor-service
+    container_name: processor-service
+    depends_on: [kafka, elasticsearch, redis]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC_RAW_LOGS: raw-logs
+      KAFKA_TOPIC_INCIDENTS: incidents
+      KAFKA_CONSUMER_GROUP: processor-group
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      ELASTICSEARCH_INDEX: logs
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    networks: [platform]
+    restart: on-failure
+
+  alert-service:
+    build: ./alert-service
+    container_name: alert-service
+    depends_on: [kafka, redis, incidents-db]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC_INCIDENTS: incidents
+      KAFKA_CONSUMER_GROUP: alert-group
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: postgresql://incidentuser:incidentpass@incidents-db:5432/incidentsdb
+    networks: [platform]
+    restart: on-failure
+
+  query-service:
+    build: ./query-service
+    container_name: query-service
+    depends_on: [elasticsearch, incidents-db]
+    ports:
+      - "8082:8080"
+    environment:
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      ELASTICSEARCH_INDEX: logs
+      DATABASE_URL: postgresql://incidentuser:incidentpass@incidents-db:5432/incidentsdb
+    networks: [platform]
+    restart: on-failure
+
+  ui-dashboard:
+    build: ./ui-dashboard
+    container_name: ui-dashboard
+    depends_on: [ingestion-service, query-service]
+    ports:
+      - "3000:80"
+    networks: [platform]
+    restart: on-failure
+
+volumes:
+  es-data:
+  incidents-db-data:
+
+networks:
+  platform:
+    driver: bridge

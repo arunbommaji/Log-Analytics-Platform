@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Log Analytics — Incident Detection</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet"/>
+<style>
+  :root{--bg:#07090f;--bg2:#0d1117;--bg3:#161b22;--border:#21262d;--accent:#58a6ff;--green:#3fb950;--yellow:#d29922;--red:#f85149;--orange:#db6d28;--text:#c9d1d9;--muted:#8b949e}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'IBM Plex Mono',monospace;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+  .header{height:48px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:20px;flex-shrink:0}
+  .logo{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:var(--accent)}
+  .logo span{color:var(--muted)}
+  .h-sep{width:1px;height:20px;background:var(--border)}
+  .h-tabs{display:flex;gap:0}
+  .tab{padding:0 16px;height:48px;display:flex;align-items:center;font-size:12px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+  .tab.active{color:var(--text);border-bottom-color:var(--accent)}
+  .tab:hover:not(.active){color:var(--text)}
+  .h-right{margin-left:auto;display:flex;align-items:center;gap:16px}
+  .dot-row{display:flex;gap:12px}
+  .dot-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+  .dot.off{background:var(--muted);animation:none!important}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+  .dot.warn{background:var(--yellow);animation:blink 2s infinite}
+  #clock{font-size:12px;color:var(--muted)}
+
+  /* ── main panels ─────────────────────────────────── */
+  .body{flex:1;display:grid;grid-template-columns:260px 1fr 300px;overflow:hidden}
+
+  /* left */
+  .left{border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+  .panel-title{padding:12px 16px;font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)}
+
+  /* stats */
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border)}
+  .stat{padding:14px 16px;border-right:1px solid var(--border)}
+  .stat:nth-child(2),.stat:nth-child(4){border-right:none}
+  .stat:nth-child(3),.stat:nth-child(4){border-top:1px solid var(--border)}
+  .stat-val{font-size:24px;font-weight:600;font-family:'Space Grotesk',sans-serif}
+  .stat-val.blue{color:var(--accent)}.stat-val.green{color:var(--green)}.stat-val.red{color:var(--red)}.stat-val.yellow{color:var(--yellow)}
+  .stat-lbl{font-size:10px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
+
+  /* services list */
+  .services-list{flex:1;overflow-y:auto;padding:8px 0}
+  .svc-row{padding:8px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:background .1s;font-size:12px}
+  .svc-row:hover,.svc-row.active{background:var(--bg3)}
+  .svc-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .svc-name{flex:1;color:var(--text)}
+  .svc-count{font-size:10px;color:var(--muted)}
+  .svc-row.has-errors .svc-dot{background:var(--red)}
+  .svc-row.has-warnings .svc-dot{background:var(--yellow)}
+  .svc-row .svc-dot{background:var(--green)}
+
+  /* send log form */
+  .send-form{padding:12px 16px;border-top:1px solid var(--border)}
+  .send-form label{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .send-form select,.send-form input,.send-form textarea{
+    width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);
+    padding:7px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;border-radius:4px;
+    outline:none;transition:border-color .15s;margin-bottom:8px;
+  }
+  .send-form textarea{height:52px;resize:none}
+  .send-form select:focus,.send-form input:focus,.send-form textarea:focus{border-color:var(--accent)}
+  .send-form option{background:var(--bg3)}
+  .btn-send{width:100%;padding:8px;background:var(--accent);color:#000;border:none;font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;transition:opacity .15s}
+  .btn-send:hover{opacity:.85}
+
+  /* center: log stream */
+  .center{display:flex;flex-direction:column;overflow:hidden}
+  .log-controls{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  .search-box{flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'IBM Plex Mono',monospace;font-size:12px;border-radius:4px;outline:none}
+  .search-box:focus{border-color:var(--accent)}
+  .filter-sel{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:7px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;border-radius:4px;outline:none}
+  .live-badge{font-size:10px;color:var(--green);background:#0d2a14;border:1px solid var(--green);padding:3px 8px;border-radius:3px;white-space:nowrap}
+  .live-badge.paused{color:var(--muted);background:var(--bg3);border-color:var(--border)}
+
+  .log-stream{flex:1;overflow-y:auto;font-size:11px;line-height:1.5}
+  .log-row{display:flex;align-items:flex-start;padding:5px 16px;border-bottom:1px solid rgba(33,38,45,.5);transition:background .1s;gap:8px}
+  .log-row:hover{background:var(--bg3)}
+  .log-time{color:var(--muted);flex-shrink:0;width:80px}
+  .log-level{flex-shrink:0;width:52px;text-align:center;border-radius:3px;padding:1px 4px;font-size:10px}
+  .log-level.DEBUG{background:#1a1f29;color:#6e7681}
+  .log-level.INFO {background:#0d2a14;color:var(--green)}
+  .log-level.WARN {background:#2d1f07;color:var(--yellow)}
+  .log-level.ERROR,.log-level.CRITICAL{background:#2d0f0d;color:var(--red)}
+  .log-svc{color:var(--accent);flex-shrink:0;width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .log-msg{color:var(--text);flex:1;word-break:break-word}
+  .log-rt{color:var(--muted);flex-shrink:0;width:56px;text-align:right}
+
+  /* right: incidents */
+  .right{border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+  .incident-list{flex:1;overflow-y:auto;padding:4px 0}
+  .incident-card{padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+  .incident-card:hover{background:var(--bg3)}
+  .inc-header{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+  .sev-badge{font-size:9px;font-weight:600;padding:2px 6px;border-radius:3px;text-transform:uppercase}
+  .sev-badge.CRITICAL{background:#2d0f0d;color:var(--red)}
+  .sev-badge.HIGH    {background:#2d1a07;color:var(--orange)}
+  .sev-badge.MEDIUM  {background:#2d1f07;color:var(--yellow)}
+  .sev-badge.LOW     {background:#0d2a14;color:var(--green)}
+  .inc-type{font-size:11px;color:var(--text);font-weight:500}
+  .inc-svc{font-size:10px;color:var(--accent)}
+  .inc-msg{font-size:10px;color:var(--muted);line-height:1.4;margin-top:2px;word-break:break-word}
+  .inc-time{font-size:9px;color:var(--muted);margin-top:4px}
+  .no-incidents{padding:40px 14px;text-align:center;color:var(--muted);font-size:11px}
+
+  /* scrollbar */
+  ::-webkit-scrollbar{width:3px;height:3px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 20px;border-radius:6px;font-size:12px;z-index:999;transition:transform .25s;pointer-events:none}
+  #toast.show{transform:translateX(-50%) translateY(0)}
+  #toast.ok{border-color:var(--green);color:var(--green)}
+  #toast.err{border-color:var(--red);color:var(--red)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">LOG<span>ANALYTICS</span></div>
+  <div class="h-sep"></div>
+  <div class="h-tabs">
+    <div class="tab active">Live Stream</div>
+    <div class="tab" onclick="window.open('http://localhost:8090','_blank')">Kafka UI ↗</div>
+    <div class="tab" onclick="window.open('http://localhost:5601','_blank')">Kibana ↗</div>
+  </div>
+  <div class="h-right">
+    <div class="dot-row">
+      <div class="dot-item"><div class="dot" id="d-api"></div>Ingestion API</div>
+      <div class="dot-item"><div class="dot" id="d-es"></div>Elasticsearch</div>
+      <div class="dot-item"><div class="dot off" id="d-kafka"></div>Kafka</div>
+    </div>
+    <div class="h-sep"></div>
+    <div id="clock">--:--:--</div>
+  </div>
+</div>
+
+<div class="body">
+
+  <!-- ── LEFT ─────────────────────────────────────────── -->
+  <div class="left">
+    <div class="panel-title">Overview</div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-val blue" id="s-total">0</div><div class="stat-lbl">Total logs</div></div>
+      <div class="stat"><div class="stat-val green" id="s-info">0</div><div class="stat-lbl">Info</div></div>
+      <div class="stat"><div class="stat-val yellow" id="s-warn">0</div><div class="stat-lbl">Warn</div></div>
+      <div class="stat"><div class="stat-val red" id="s-error">0</div><div class="stat-lbl">Errors</div></div>
+    </div>
+
+    <div class="panel-title" style="margin-top:0">Services</div>
+    <div class="services-list" id="services-list">
+      <div style="padding:12px 16px;font-size:11px;color:var(--muted)">Waiting for logs…</div>
+    </div>
+
+    <div class="send-form">
+      <div class="panel-title" style="padding:0;margin-bottom:10px">Send Log</div>
+      <label>Service</label>
+      <select id="f-service">
+        <option>order-service</option><option>payment-service</option>
+        <option>inventory-service</option><option>auth-service</option>
+        <option>api-gateway</option><option>user-service</option>
+      </select>
+      <label>Level</label>
+      <select id="f-level">
+        <option>INFO</option><option>WARN</option>
+        <option>ERROR</option><option>DEBUG</option><option>CRITICAL</option>
+      </select>
+      <label>Message</label>
+      <textarea id="f-msg" placeholder="NullPointerException in OrderService…">Connection refused to payment gateway</textarea>
+      <button class="btn-send" onclick="sendLog()">SEND LOG →</button>
+    </div>
+  </div>
+
+  <!-- ── CENTER ────────────────────────────────────────── -->
+  <div class="center">
+    <div class="log-controls">
+      <input class="search-box" id="search" placeholder="Search logs…" oninput="applyFilters()"/>
+      <select class="filter-sel" id="filter-level" onchange="applyFilters()">
+        <option value="">All levels</option>
+        <option>DEBUG</option><option>INFO</option>
+        <option>WARN</option><option>ERROR</option><option>CRITICAL</option>
+      </select>
+      <select class="filter-sel" id="filter-service" onchange="applyFilters()">
+        <option value="">All services</option>
+      </select>
+      <div class="live-badge" id="live-badge" onclick="toggleLive()">⬤ LIVE</div>
+    </div>
+    <div class="log-stream" id="log-stream">
+      <div style="padding:40px;text-align:center;color:var(--muted);font-size:12px">
+        Waiting for log entries…<br/><br/>
+        Use the Send Log form on the left, or run:<br/>
+        <code style="color:var(--accent)">python3 scripts/generate_logs.py</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT ─────────────────────────────────────────── -->
+  <div class="right">
+    <div class="panel-title">
+      Incidents
+      <span id="inc-count" style="float:right;color:var(--red)">0</span>
+    </div>
+    <div class="incident-list" id="incident-list">
+      <div class="no-incidents">No active incidents<br/>🟢 All systems normal</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast">Sent</div>
+
+<script>
+const INGEST = '/api/ingest';
+const QUERY  = '/api/query';
+
+let allLogs    = [];
+let incidents  = [];
+let isLive     = true;
+let stats      = {total:0, info:0, warn:0, error:0};
+let services   = {};
+
+// ── send log ──────────────────────────────────────────
+async function sendLog() {
+  const svc = document.getElementById('f-service').value;
+  const lvl = document.getElementById('f-level').value;
+  const msg = document.getElementById('f-msg').value.trim();
+  if (!msg) { toast('Enter a message', 'err'); return; }
+  try {
+    const r = await fetch(INGEST + '/logs', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({service:svc, level:lvl, message:msg,
+        response_time_ms: lvl==='ERROR'?5500:lvl==='WARN'?1200:200})
+    });
+    if (!r.ok) throw new Error(r.status);
+    toast('Log sent → Kafka → Elasticsearch', 'ok');
+  } catch(e) { toast('Failed: '+e, 'err'); }
+}
+
+// ── polling ───────────────────────────────────────────
+async function pollLogs() {
+  if (!isLive) return;
+  try {
+    const r = await fetch(QUERY + '/logs?size=30');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.logs && data.logs.length) {
+      allLogs = data.logs;
+      updateStats();
+      updateServices();
+      renderLogs();
+    }
+    document.getElementById('d-es').className = 'dot';
+  } catch { document.getElementById('d-es').className = 'dot off'; }
+}
+
+async function pollIncidents() {
+  try {
+    const r = await fetch(QUERY + '/incidents?status=OPEN&limit=20');
+    if (!r.ok) return;
+    const data = await r.json();
+    incidents = data.incidents || [];
+    renderIncidents();
+  } catch {}
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch(INGEST + '/../health');
+    document.getElementById('d-api').className   = r.ok ? 'dot' : 'dot off';
+    document.getElementById('d-kafka').className = r.ok ? 'dot' : 'dot off';
+  } catch { document.getElementById('d-api').className = 'dot off'; }
+}
+
+// ── render logs ───────────────────────────────────────
+function applyFilters() {
+  renderLogs();
+}
+
+function renderLogs() {
+  const q    = document.getElementById('search').value.toLowerCase();
+  const lvl  = document.getElementById('filter-level').value;
+  const svc  = document.getElementById('filter-service').value;
+
+  let filtered = allLogs;
+  if (q)   filtered = filtered.filter(l => l.message.toLowerCase().includes(q) || l.service.toLowerCase().includes(q));
+  if (lvl) filtered = filtered.filter(l => l.level === lvl);
+  if (svc) filtered = filtered.filter(l => l.service === svc);
+
+  const stream = document.getElementById('log-stream');
+  if (!filtered.length) {
+    stream.innerHTML = '<div style="padding:20px;color:var(--muted);font-size:11px;text-align:center">No logs match filter</div>';
+    return;
+  }
+  stream.innerHTML = filtered.map(l => {
+    const t  = new Date(l.timestamp).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const rt = l.response_time_ms ? `${l.response_time_ms}ms` : '';
+    return `<div class="log-row">
+      <span class="log-time">${t}</span>
+      <span class="log-level ${l.level}">${l.level}</span>
+      <span class="log-svc">${l.service}</span>
+      <span class="log-msg">${escHtml(l.message)}</span>
+      <span class="log-rt">${rt}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── render incidents ──────────────────────────────────
+function renderIncidents() {
+  const el = document.getElementById('incident-list');
+  document.getElementById('inc-count').textContent = incidents.length || '';
+  if (!incidents.length) {
+    el.innerHTML = '<div class="no-incidents">No active incidents<br/>🟢 All systems normal</div>';
+    return;
+  }
+  el.innerHTML = incidents.map(i => {
+    const t = new Date(i.created_at).toLocaleTimeString();
+    return `<div class="incident-card">
+      <div class="inc-header">
+        <span class="sev-badge ${i.severity}">${i.severity}</span>
+        <span class="inc-type">${i.type.replace(/_/g,' ')}</span>
+      </div>
+      <div class="inc-svc">${i.service}</div>
+      <div class="inc-msg">${escHtml(i.message)}</div>
+      <div class="inc-time">${t}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── stats + services ──────────────────────────────────
+function updateStats() {
+  stats = {total:allLogs.length, info:0, warn:0, error:0};
+  services = {};
+  allLogs.forEach(l => {
+    if (l.level === 'INFO' || l.level === 'DEBUG') stats.info++;
+    else if (l.level === 'WARN') stats.warn++;
+    else if (l.level === 'ERROR' || l.level === 'CRITICAL') stats.error++;
+    if (!services[l.service]) services[l.service] = {info:0,warn:0,error:0};
+    if (l.level === 'ERROR' || l.level === 'CRITICAL') services[l.service].error++;
+    else if (l.level === 'WARN') services[l.service].warn++;
+    else services[l.service].info++;
+  });
+  document.getElementById('s-total').textContent = stats.total;
+  document.getElementById('s-info').textContent  = stats.info;
+  document.getElementById('s-warn').textContent  = stats.warn;
+  document.getElementById('s-error').textContent = stats.error;
+}
+
+function updateServices() {
+  const sel = document.getElementById('filter-service');
+  const cur = sel.value;
+  const svcs = Object.keys(services);
+  sel.innerHTML = '<option value="">All services</option>' +
+    svcs.map(s=>`<option${s===cur?' selected':''}>${s}</option>`).join('');
+
+  const list = document.getElementById('services-list');
+  list.innerHTML = svcs.map(s => {
+    const d = services[s];
+    const cls = d.error>0?'has-errors':d.warn>0?'has-warnings':'';
+    return `<div class="svc-row ${cls}" onclick="filterBySvc('${s}')">
+      <div class="svc-dot"></div>
+      <span class="svc-name">${s}</span>
+      <span class="svc-count">${d.error>0?`<span style="color:var(--red)">${d.error}E</span> `:''}${d.warn>0?`<span style="color:var(--yellow)">${d.warn}W</span>`:''}${d.error===0&&d.warn===0?d.info:'+'}</span>
+    </div>`;
+  }).join('');
+}
+
+function filterBySvc(svc) {
+  document.getElementById('filter-service').value = svc;
+  applyFilters();
+}
+
+function toggleLive() {
+  isLive = !isLive;
+  const b = document.getElementById('live-badge');
+  b.textContent = isLive ? '⬤ LIVE' : '⏸ PAUSED';
+  b.className   = isLive ? 'live-badge' : 'live-badge paused';
+}
+
+function toast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + (type==='ok'?'ok':type==='err'?'err':'');
+  setTimeout(()=>t.className='',3000);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── init ──────────────────────────────────────────────
+checkHealth(); setInterval(checkHealth, 10000);
+pollLogs();    setInterval(pollLogs, 3000);
+pollIncidents(); setInterval(pollIncidents, 5000);
+setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour12:false}),1000);
+</script>
+</body>
+</html>
