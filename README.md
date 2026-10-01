@@ -1,5 +1,7 @@
 # Real-Time Log Analytics & Incident Detection Platform
 
+> Performance claims should come from reproducible measurements. See `BENCHMARKING.md` and `benchmarks/log_benchmark.py`.
+
 Real-time log processing pipeline that ingests logs from any service, indexes them in Elasticsearch, and automatically detects incidents using pattern matching, error rate analysis, and latency anomaly detection.
 
 ## 🚀 Quick Start
